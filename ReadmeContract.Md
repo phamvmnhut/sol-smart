@@ -16,3 +16,6 @@ Không cần sử dụng Safe Math nữa, vì trong bản solidity 0.8.0 trở l
 - `0x32` : khi truy cập giá trị của mảng mà index nằm ngoài giới hạn của mảng hoặc âm ( tức là x[i] vs i > x.lenth hoặc i <0
 - `0x41` : Nếu bạn phân bổ quá nhiều bộ nhớ hoặc tạo một mảng quá lớn.
 - `0x51` : Nếu bạn gọi một biến không được khởi tạo
+
+https://viblo.asia/p/lam-the-nao-de-upgrade-mot-smart-contract-tren-ethereum-phan-2-phan-cuoi-vyDZOqJG5wj
+
