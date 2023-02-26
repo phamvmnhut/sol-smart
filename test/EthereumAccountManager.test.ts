@@ -2,135 +2,79 @@ import { expect } from 'chai';
 import { ethers } from 'hardhat';
 import { SignerWithAddress } from '@nomiclabs/hardhat-ethers/signers';
 import { anyValue } from "@nomicfoundation/hardhat-chai-matchers/withArgs";
-import { EthereumAccountManager as AccountManager } from '../typechain-types';
+import { EthereumAccountManager } from '../typechain-types';
 
 describe('EthereumAccountManager', function () {
-  let accountManager: AccountManager;
-  let owner: SignerWithAddress;
-  let user1: SignerWithAddress;
-  let user2: SignerWithAddress;
+  let teacher: SignerWithAddress;
+  let student: SignerWithAddress;
+  let anotherStudent: SignerWithAddress;
+  let tuitionContract: EthereumAccountManager;
+
+  const tuitionAmount = ethers.utils.parseEther("1");
+  const studentPaymentAmount = ethers.utils.parseEther("0.5");
 
   beforeEach(async function () {
-    [owner, user1, user2] = await ethers.getSigners();
-    const accountManagerFactory = await ethers.getContractFactory('EthereumAccountManager', owner);
-    accountManager = (await accountManagerFactory.deploy()) as AccountManager;
-    // await accountManager.deployed();
+    [teacher, student, anotherStudent] = await ethers.getSigners();
+
+    const TuitionContract = await ethers.getContractFactory("EthereumAccountManager");
+    tuitionContract = await TuitionContract.connect(teacher).deploy(teacher.address, student.address, tuitionAmount);
+    await tuitionContract.deployed();
   });
 
-  describe("Account", () => {
-    it("should allow to register an account", async () => {
+  it("should allow the student to pay the tuition multiple times and teacher withdraw", async function () {
+    const payment1 = ethers.utils.parseEther("0.5");
+    const payment2 = ethers.utils.parseEther("0.3");
+    const payment3 = ethers.utils.parseEther("0.2");
 
-      await expect(
-        accountManager.connect(owner).login()
-      ).to.be.rejectedWith("Account does not exist");
+    const teacherBalanceBefore = await teacher.getBalance();
 
-      await expect(
-        accountManager.connect(user1).getAccountBalance()
-      ).to.be.revertedWith("Account does not exist");
+    await tuitionContract.connect(student).payTuition({ value: payment1 });
+    expect(await tuitionContract.totalPaid()).to.equal(payment1);
 
-      // Register account
-      await accountManager.connect(owner).registerAccount();
+    await tuitionContract.connect(student).payTuition({ value: payment2 });
+    expect(await tuitionContract.totalPaid()).to.equal(payment1.add(payment2));
 
-      // Check account balance
-      const balance = await accountManager.connect(owner).getAccountBalance();
-      expect(balance).to.equal(10);
+    await tuitionContract.connect(student).payTuition({ value: payment3 });
+    expect(await tuitionContract.totalPaid()).to.equal(tuitionAmount);
 
-      await expect(
-        accountManager.connect(owner).login()
-      ).not.to.be.reverted;
+    await tuitionContract.connect(teacher).withdrawFunds();
 
-      // Check account repeat register
-      await expect(accountManager.connect(owner).registerAccount()
-      ).to.be.rejectedWith("Account already exists");
-    });
+    const teacherBalanceAfter = await teacher.getBalance();
+    expect(teacherBalanceAfter).to.be.gt(teacherBalanceBefore);
   });
 
-  describe("Tranfer", () => {
-    it("should tranfer to another account", async () => {
-      await accountManager.connect(user1).registerAccount();
-      await accountManager.connect(user2).registerAccount();
-
-      await (await accountManager.connect(user1).transfer(user2.address, 2)).wait();
-
-      const user1Balance = await accountManager.connect(user1).getAccountBalance();
-      const user2Balance = await accountManager.connect(user2).getAccountBalance();
-
-      expect(user1Balance).to.equal(10 - 2);
-      expect(user2Balance).to.equal(10 + 2);
-    });
-
-    it("not should tranfer to account not exist", async () => {
-      await accountManager.connect(user1).registerAccount();
-      await expect(
-        accountManager.connect(user1).transfer(user2.address, 2)
-      ).to.be.rejectedWith("Invalid recipient address");
-    });
-
-    it("balance not enough", async () => {
-      await accountManager.connect(user1).registerAccount();
-      await expect(
-        accountManager.connect(user1).transfer(user2.address, 10 + 2)
-      ).to.be.rejectedWith("Insufficient balance");
-    });
+  it("should not allow the teacher to withdraw the tuition if tuition not full", async function () {
+    await tuitionContract.connect(student).payTuition({ value: studentPaymentAmount });
+    
+    await expect( tuitionContract.connect(teacher).withdrawFunds()).to.be.rejectedWith("The tuition has not been paid in full yet.")
   });
 
-  describe("Events", function () {
-    it("should emit event Register", async function () {
-      await expect(
-        accountManager.connect(user1).registerAccount()
-      ).to.emit(accountManager, "AccountRegistered").withArgs(anyValue, 10);
-    });
+  it("should allow the teacher to withdraw the tuition", async function () {
+    const teacherBalanceBefore = await teacher.getBalance();
+    await tuitionContract.connect(student).payTuition({ value: tuitionAmount });
+    
+    await tuitionContract.connect(teacher).withdrawFunds();
 
-    it("should emit Login event", async function () {
-      await accountManager.connect(user1).registerAccount();
-      await expect(
-        accountManager.connect(user1).login()
-      ).to.emit(accountManager, "AccountLoggedIn").withArgs(user1.address);
-    });
+    const teacherBalanceAfter = await teacher.getBalance();
+    expect(teacherBalanceAfter).to.be.gt(teacherBalanceBefore);
+  });
 
-    it("should emit event AccountBalanceChanged", async function() {
-      await accountManager.connect(user1).registerAccount();
-      await accountManager.connect(user2).registerAccount();
-      const tx = await accountManager.connect(user1).transfer(user2.address, 2);
-      const receipt = await tx.wait();
-      const events = receipt.events;
-      if (events !== undefined) {
-        expect(events.length).to.equal(2);
-        expect(events[0].event).to.equal("AccountBalanceChanged");
-        expect(events[0].args?.accountOwner).to.equal(user1.address);
-        expect(events[0].args?.newBalance).to.equal(10 - 2);
-      }
-    });
-  })
+  it("should revert if non-student account tries to pay the tuition", async function () {
+    await expect(
+      tuitionContract.connect(anotherStudent).payTuition({ value: tuitionAmount })
+    ).to.be.revertedWith("Only the student can pay the tuition.");
+  });
 
+  it("should revert if the payment amount is zero", async function () {
+    await expect(
+      tuitionContract.connect(student).payTuition({ value: 0 })
+    ).to.be.revertedWith("The payment amount must be greater than 0.");
+  });
+
+  it("should revert if the tuition has already been paid in full", async function () {
+    await tuitionContract.connect(student).payTuition({ value: tuitionAmount });
+    await expect(
+      tuitionContract.connect(student).payTuition({ value: tuitionAmount })
+    ).to.be.revertedWith("The tuition has already been paid in full.");
+  });
 });
-
-describe('Another', function () {
-  // it("should return the correct block timestamp", async function () {
-  //   const currentBlockNumber = await ethers.provider.getBlockNumber();
-  //   const currentBlock = await ethers.provider.getBlock(currentBlockNumber);
-  //   const currentTimestamp = currentBlock.timestamp;
-
-  //   expect(currentTimestamp).to.be.closeTo(Math.floor(Date.now() / 1000), 20);
-  // });
-
-  it("should receive ETH when sent from another account", async function () {
-    const [user1, user2] = await ethers.getSigners();
-    const initialBalance = await ethers.provider.getBalance(user1.address);
-    const gasPrice = await ethers.provider.getGasPrice();
-  
-    const tx = await user2.sendTransaction({
-      to: user1.address,
-      value: ethers.utils.parseEther("1.0"),
-      gasPrice: gasPrice,
-    });
-  
-    const receipt = await tx.wait();
-  
-    const finalBalance = await ethers.provider.getBalance(user1.address);
-    const expectedBalance = initialBalance.add(ethers.utils.parseEther("1.0"));
-  
-    expect(finalBalance).to.equal(expectedBalance);
-  });
-
-})  
