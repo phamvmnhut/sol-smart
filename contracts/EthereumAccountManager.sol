@@ -1,52 +1,82 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.4;
 
-contract EthereumAccountManager {
-    address payable public teacher;
-    address payable public student;
-    uint public tuitionAmount;
-    uint public totalPaid;
+import "@openzeppelin/contracts/access/AccessControl.sol";
 
-    constructor(
-        address payable _teacher,
-        address payable _student,
-        uint _tuitionAmount
-    ) {
-        teacher = _teacher;
-        student = _student;
-        tuitionAmount = _tuitionAmount;
+contract EthereumAccountManager is AccessControl {
+    // transfer from sender account to recipent account
+    function transfer(address payable recipient) public payable {
+        recipient.transfer(msg.value);
     }
 
-    function payTuition() public payable {
-        require(msg.sender == student, "Only the student can pay the tuition.");
-        require(msg.value > 0, "The payment amount must be greater than 0.");
-        require(
-            totalPaid < tuitionAmount,
-            "The tuition has already been paid in full."
-        );
+    // Define roles
+    bytes32 public constant ADMIN_ROLE = keccak256("ADMIN_ROLE");
+    bytes32 public constant USER_ROLE = keccak256("USER_ROLE");
 
-        uint remainingTuition = tuitionAmount - totalPaid;
-        if (msg.value >= remainingTuition) {
-            teacher.transfer(remainingTuition);
-            if (msg.value > remainingTuition) {
-                student.transfer(msg.value - remainingTuition);
-            }
-            totalPaid = tuitionAmount;
-        } else {
-            // student.transfer(msg.value);
-            totalPaid += msg.value;
-        }
+    // Define events
+    event AdminAdded(address indexed account);
+    event AdminRemoved(address indexed account);
+    event UserAdded(address indexed account);
+    event UserRemoved(address indexed account);
+
+    // Constructor
+    constructor() {
+        // Assign roles to contract creator
+        _setupRole(ADMIN_ROLE, msg.sender);
+        _setupRole(USER_ROLE, msg.sender);
     }
 
-    function withdrawFunds() public {
-        require(msg.sender == teacher, "Only the teacher can withdraw funds.");
-        require(
-            totalPaid == tuitionAmount,
-            "The tuition has not been paid in full yet."
-        );
-
-        uint amount = address(this).balance;
-        teacher.transfer(amount);
+    // Add admin role
+    function addAdmin(address account) public onlyRole(ADMIN_ROLE) {
+        _grantRole(ADMIN_ROLE, account);
+        emit AdminAdded(account);
     }
 
+    // Remove admin role
+    function removeAdmin(address account) public onlyRole(ADMIN_ROLE) {
+        _revokeRole(ADMIN_ROLE, account);
+        emit AdminRemoved(account);
+    }
+
+    // Add user role
+    function addUser(address account) public onlyRole(ADMIN_ROLE) {
+        _grantRole(USER_ROLE, account);
+        emit UserAdded(account);
+    }
+
+    // Remove user role
+    function removeUser(address account) public onlyRole(ADMIN_ROLE) {
+        _revokeRole(USER_ROLE, account);
+        emit UserRemoved(account);
+    }
+
+    // Only allow admins to call this function
+    function adminOnlyFunction()
+        public
+        view
+        onlyRole(ADMIN_ROLE)
+        returns (string memory)
+    {
+        return "Admin only function";
+    }
+
+    // Only allow users to call this function
+    function userOnlyFunction()
+        public
+        view
+        onlyRole(USER_ROLE)
+        returns (string memory)
+    {
+        return "User only function";
+    }
+
+    function myFunction() public view onlyAdmin returns (string memory) {
+        return "Admin only function";
+    }
+
+    // custom only Admin modifier
+    modifier onlyAdmin() {
+        require(hasRole(ADMIN_ROLE, msg.sender), "Restricted to admins");
+        _;
+    }
 }

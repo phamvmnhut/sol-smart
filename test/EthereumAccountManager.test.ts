@@ -3,78 +3,81 @@ import { ethers } from 'hardhat';
 import { SignerWithAddress } from '@nomiclabs/hardhat-ethers/signers';
 import { anyValue } from "@nomicfoundation/hardhat-chai-matchers/withArgs";
 import { EthereumAccountManager } from '../typechain-types';
+import { BigNumber, ContractTransaction } from 'ethers';
+
+const toWei = (num: number) => ethers.utils.parseEther(num.toString())
+const fromWei = (num: BigNumber) => ethers.utils.formatEther(num);
 
 describe('EthereumAccountManager', function () {
-  let teacher: SignerWithAddress;
-  let student: SignerWithAddress;
-  let anotherStudent: SignerWithAddress;
-  let tuitionContract: EthereumAccountManager;
-
-  const tuitionAmount = ethers.utils.parseEther("1");
-  const studentPaymentAmount = ethers.utils.parseEther("0.5");
+  let owner: SignerWithAddress;
+  let user1: SignerWithAddress;
+  let user2: SignerWithAddress;
+  let accountManager: EthereumAccountManager;
 
   beforeEach(async function () {
-    [teacher, student, anotherStudent] = await ethers.getSigners();
-
-    const TuitionContract = await ethers.getContractFactory("EthereumAccountManager");
-    tuitionContract = await TuitionContract.connect(teacher).deploy(teacher.address, student.address, tuitionAmount);
-    await tuitionContract.deployed();
+    const accountManagerFactory = await ethers.getContractFactory('EthereumAccountManager');
+    [owner, user1, user2] = await ethers.getSigners();
+    accountManager = (await accountManagerFactory.connect(owner).deploy()) as EthereumAccountManager;
+    await accountManager.deployed();
   });
 
-  it("should allow the student to pay the tuition multiple times and teacher withdraw", async function () {
-    const payment1 = ethers.utils.parseEther("0.5");
-    const payment2 = ethers.utils.parseEther("0.3");
-    const payment3 = ethers.utils.parseEther("0.2");
+  // describe("Account", () => {
+  //   it("Should transfer ether to recipient", async function () {
+  //     const value = toWei(1);
+  //     const gasPrice = await ethers.provider.getGasPrice();
 
-    const teacherBalanceBefore = await teacher.getBalance();
+  //     // Check user1 balance before transfer
+  //     const user1BalanceBefore = await user1.getBalance();
+  //     const user2BalanceBefore = await user2.getBalance();
 
-    await tuitionContract.connect(student).payTuition({ value: payment1 });
-    expect(await tuitionContract.totalPaid()).to.equal(payment1);
+  //     // Transfer ether
+  //     const tx = await accountManager.connect(user1).transfer(user2.address, {
+  //       value,
+  //     });
+  //     const receipt = await tx.wait();
 
-    await tuitionContract.connect(student).payTuition({ value: payment2 });
-    expect(await tuitionContract.totalPaid()).to.equal(payment1.add(payment2));
+  //     // Check user2 balance after transfer
+  //     const user2Balance = await ethers.provider.getBalance(user2.address);
+  //     expect(user2Balance).to.equal(user2BalanceBefore.add(value));
 
-    await tuitionContract.connect(student).payTuition({ value: payment3 });
-    expect(await tuitionContract.totalPaid()).to.equal(tuitionAmount);
+  //     // Check user1 balance after transfer
+  //     const user1BalanceAfter = await user1.getBalance();
+  //     const expectedOwnerBalance = user1BalanceBefore.sub(value).sub(gasPrice.mul(receipt.gasUsed));
+  //     expect(user1BalanceAfter).to.equal(expectedOwnerBalance);
+  //   });
+  // });
 
-    await tuitionContract.connect(teacher).withdrawFunds();
+  describe("Role", function () {
 
-    const teacherBalanceAfter = await teacher.getBalance();
-    expect(teacherBalanceAfter).to.be.gt(teacherBalanceBefore);
+    let addAdminTx : ContractTransaction;
+
+    beforeEach(async function() {
+      addAdminTx = await accountManager.connect(owner).addAdmin(user1.address);
+    });
+
+    it("should owner has two role", async function () {
+      expect(await accountManager.hasRole(accountManager.ADMIN_ROLE(), owner.address)).to.equal(true);
+      expect(await accountManager.hasRole(accountManager.USER_ROLE(), owner.address)).to.equal(true);
+    });
+
+    it("should add an admin", async function () {
+      expect(await accountManager.hasRole(accountManager.ADMIN_ROLE(), owner.address)).to.equal(true);
+      expect(await accountManager.hasRole(accountManager.ADMIN_ROLE(), user1.address)).to.equal(true);
+    });
+
+    it("should emit a role granted event", async function () {
+      let addAdminTx = await accountManager.connect(owner).addAdmin(user1.address);
+      // Kiểm tra sự kiện RoleGranted đã được phát ra hay chưa
+      await expect(addAdminTx)
+        .to.emit(accountManager, "AdminAdded")
+        .withArgs(user1.address);
+    });
+
+    it("should revert if non-admin tries to add admin", async function () {
+      // Thử thêm addr2 vào role ADMIN_ROLE với một địa chỉ khác không có quyền ADMIN_ROLE
+      await expect(accountManager.connect(user2).addAdmin(user2.address))
+        .to.be.reverted;
+    });
   });
 
-  it("should not allow the teacher to withdraw the tuition if tuition not full", async function () {
-    await tuitionContract.connect(student).payTuition({ value: studentPaymentAmount });
-    
-    await expect( tuitionContract.connect(teacher).withdrawFunds()).to.be.rejectedWith("The tuition has not been paid in full yet.")
-  });
-
-  it("should allow the teacher to withdraw the tuition", async function () {
-    const teacherBalanceBefore = await teacher.getBalance();
-    await tuitionContract.connect(student).payTuition({ value: tuitionAmount });
-    
-    await tuitionContract.connect(teacher).withdrawFunds();
-
-    const teacherBalanceAfter = await teacher.getBalance();
-    expect(teacherBalanceAfter).to.be.gt(teacherBalanceBefore);
-  });
-
-  it("should revert if non-student account tries to pay the tuition", async function () {
-    await expect(
-      tuitionContract.connect(anotherStudent).payTuition({ value: tuitionAmount })
-    ).to.be.revertedWith("Only the student can pay the tuition.");
-  });
-
-  it("should revert if the payment amount is zero", async function () {
-    await expect(
-      tuitionContract.connect(student).payTuition({ value: 0 })
-    ).to.be.revertedWith("The payment amount must be greater than 0.");
-  });
-
-  it("should revert if the tuition has already been paid in full", async function () {
-    await tuitionContract.connect(student).payTuition({ value: tuitionAmount });
-    await expect(
-      tuitionContract.connect(student).payTuition({ value: tuitionAmount })
-    ).to.be.revertedWith("The tuition has already been paid in full.");
-  });
 });
