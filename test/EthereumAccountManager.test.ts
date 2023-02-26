@@ -9,74 +9,64 @@ const toWei = (num: number) => ethers.utils.parseEther(num.toString())
 const fromWei = (num: BigNumber) => ethers.utils.formatEther(num);
 
 describe('EthereumAccountManager', function () {
+  let safeMathTest: EthereumAccountManager;
   let owner: SignerWithAddress;
-  let user1: SignerWithAddress;
-  let user2: SignerWithAddress;
-  let accountManager: EthereumAccountManager;
+  let addr1: SignerWithAddress;
+  let addr2: SignerWithAddress;
 
-  beforeEach(async function () {
-    const accountManagerFactory = await ethers.getContractFactory('EthereumAccountManager');
-    [owner, user1, user2] = await ethers.getSigners();
-    accountManager = (await accountManagerFactory.connect(owner).deploy()) as EthereumAccountManager;
-    await accountManager.deployed();
+  beforeEach(async () => {
+    [owner, addr1, addr2] = await ethers.getSigners();
+    const EthereumAccountManagerFactory = await ethers.getContractFactory('EthereumAccountManager', owner);
+    safeMathTest = (await EthereumAccountManagerFactory.deploy()) as EthereumAccountManager;
   });
 
-  // describe("Account", () => {
-  //   it("Should transfer ether to recipient", async function () {
-  //     const value = toWei(1);
-  //     const gasPrice = await ethers.provider.getGasPrice();
-
-  //     // Check user1 balance before transfer
-  //     const user1BalanceBefore = await user1.getBalance();
-  //     const user2BalanceBefore = await user2.getBalance();
-
-  //     // Transfer ether
-  //     const tx = await accountManager.connect(user1).transfer(user2.address, {
-  //       value,
-  //     });
-  //     const receipt = await tx.wait();
-
-  //     // Check user2 balance after transfer
-  //     const user2Balance = await ethers.provider.getBalance(user2.address);
-  //     expect(user2Balance).to.equal(user2BalanceBefore.add(value));
-
-  //     // Check user1 balance after transfer
-  //     const user1BalanceAfter = await user1.getBalance();
-  //     const expectedOwnerBalance = user1BalanceBefore.sub(value).sub(gasPrice.mul(receipt.gasUsed));
-  //     expect(user1BalanceAfter).to.equal(expectedOwnerBalance);
-  //   });
-  // });
-
-  describe("Role", function () {
-
-    let addAdminTx : ContractTransaction;
-
-    beforeEach(async function() {
-      addAdminTx = await accountManager.connect(owner).addAdmin(user1.address);
+  describe('add', () => {
+    it('adds two numbers', async () => {
+      const result = await safeMathTest.add(5, 7);
+      expect(result).to.eq(12);
     });
 
-    it("should owner has two role", async function () {
-      expect(await accountManager.hasRole(accountManager.ADMIN_ROLE(), owner.address)).to.equal(true);
-      expect(await accountManager.hasRole(accountManager.USER_ROLE(), owner.address)).to.equal(true);
+    it('throws an error when result overflows', async () => {
+      const maxUint256 = BigNumber.from('2').pow(256).sub(2);
+      const result = safeMathTest.add(maxUint256, 3);
+      await expect(result).to.be.revertedWithPanic("0x11");
+    });
+  });
+
+  describe('sub', () => {
+    it('subtracts two numbers', async () => {
+      const result = await safeMathTest.sub(10, 3);
+      expect(result).to.eq(7);
     });
 
-    it("should add an admin", async function () {
-      expect(await accountManager.hasRole(accountManager.ADMIN_ROLE(), owner.address)).to.equal(true);
-      expect(await accountManager.hasRole(accountManager.ADMIN_ROLE(), user1.address)).to.equal(true);
+    it('throws an error when result underflows', async () => {
+      const result = safeMathTest.sub(5, 7);
+      await expect(result).to.be.revertedWithPanic("0x11");
+    });
+  });
+
+  describe('mul', () => {
+    it('multiplies two numbers', async () => {
+      const result = await safeMathTest.mul(2, 5);
+      expect(result).to.eq(10);
     });
 
-    it("should emit a role granted event", async function () {
-      let addAdminTx = await accountManager.connect(owner).addAdmin(user1.address);
-      // Kiểm tra sự kiện RoleGranted đã được phát ra hay chưa
-      await expect(addAdminTx)
-        .to.emit(accountManager, "AdminAdded")
-        .withArgs(user1.address);
+    it('throws an error when result overflows', async () => {
+      const maxUint256 = BigNumber.from('2').pow(256).sub(1);
+      const result = safeMathTest.mul(maxUint256, 2);
+      await expect(result).to.be.revertedWithPanic("0x11");
+    });
+  });
+
+  describe('div', () => {
+    it('divides two numbers', async () => {
+      const result = await safeMathTest.div(10, 2);
+      expect(result).to.eq(5);
     });
 
-    it("should revert if non-admin tries to add admin", async function () {
-      // Thử thêm addr2 vào role ADMIN_ROLE với một địa chỉ khác không có quyền ADMIN_ROLE
-      await expect(accountManager.connect(user2).addAdmin(user2.address))
-        .to.be.reverted;
+    it('throws an error when dividing by zero', async () => {
+      const result = safeMathTest.div(5, 0);
+      await expect(result).to.be.revertedWithPanic("0x12");
     });
   });
 
