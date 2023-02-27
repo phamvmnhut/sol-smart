@@ -2,131 +2,158 @@ import { expect } from 'chai';
 import { ethers } from 'hardhat';
 import { SignerWithAddress } from '@nomiclabs/hardhat-ethers/signers';
 import { anyValue } from "@nomicfoundation/hardhat-chai-matchers/withArgs";
-import { EthereumAccountManager } from '../typechain-types';
-import { BigNumber, ContractTransaction } from 'ethers';
+import { MyContract, OtherContract, MyContractV2, Token, MyContractV21, MyToken, MyContractV3, MyContractProxy } from '../typechain-types';
+import { BigNumber, Contract, ContractTransaction } from 'ethers';
 import { time, loadFixture } from "@nomicfoundation/hardhat-network-helpers";
 
 const toWei = (num: number) => ethers.utils.parseEther(num.toString())
 const fromWei = (num: BigNumber) => ethers.utils.formatEther(num);
 
-describe('EthereumAccountManager', function () {
-  // We define a fixture to reuse the same setup in every test.
-  // We use loadFixture to run this setup once, snapshot that state,
-  // and reset Hardhat Network to that snapshot in every test.
-  async function deployOneYearLockFixture() {
-    const ONE_YEAR_IN_SECS = 365 * 24 * 60 * 60;
-    const ONE_GWEI = 1_000_000_000;
+describe('MyContractV1', function () {
+  let myContract: Contract;
+  let otherContract: Contract;
+  let owner: SignerWithAddress;
+  let otherContractOwner: SignerWithAddress;
 
-    const lockedAmount = ONE_GWEI;
-    const unlockTime = (await time.latest()) + ONE_YEAR_IN_SECS;
+  beforeEach(async function () {
+    [owner, otherContractOwner] = await ethers.getSigners();
 
-    // Contracts are deployed using the first signer/account by default
-    const [owner, otherAccount] = await ethers.getSigners();
+    const OtherContract = await ethers.getContractFactory("OtherContract");
+    otherContract = await OtherContract.connect(otherContractOwner).deploy();
 
-    const Lock = await ethers.getContractFactory("EthereumAccountManager");
-    const lock = await Lock.deploy(unlockTime, { value: lockedAmount }) as EthereumAccountManager;
-
-    return { lock, unlockTime, lockedAmount, owner, otherAccount };
-  }
-
-  describe("Deployment", function () {
-    it("Should set the right unlockTime", async function () {
-      const { lock, unlockTime } = await loadFixture(deployOneYearLockFixture);
-
-      expect(await lock.unlockTime()).to.equal(unlockTime);
-    });
-
-    it("Should set the right owner", async function () {
-      const { lock, owner } = await loadFixture(deployOneYearLockFixture);
-
-      expect(await lock.owner()).to.equal(owner.address);
-    });
-
-    it("Should receive and store the funds to lock", async function () {
-      const { lock, lockedAmount } = await loadFixture(
-        deployOneYearLockFixture
-      );
-
-      expect(await ethers.provider.getBalance(lock.address)).to.equal(
-        lockedAmount
-      );
-    });
-
-    it("Should fail if the unlockTime is not in the future", async function () {
-      // We don't use the fixture here because we want a different deployment
-      const latestTime = await time.latest();
-      const Lock = await ethers.getContractFactory("EthereumAccountManager");
-      await expect(Lock.deploy(latestTime, { value: 1 })).to.be.revertedWith(
-        "Unlock time should be in the future"
-      );
-    });
+    const MyContract = await ethers.getContractFactory("MyContract");
+    myContract = await MyContract.connect(owner).deploy();
+    await myContract.setOtherContract(otherContract.address);
   });
 
-  describe("Withdrawals", function () {
-    describe("Validations", function () {
-      it("Should revert with the right error if called too soon", async function () {
-        const { lock } = await loadFixture(deployOneYearLockFixture);
+  it("should call the getNumber function of the other contract and return the result", async function () {
+    const valueToSet = 42;
+    await otherContract.connect(otherContractOwner).setNumber(valueToSet);
 
-        await expect(lock.withdraw()).to.be.revertedWith(
-          "You can't withdraw yet"
-        );
-      });
+    const tx = await myContract.callOtherContract();
+    const receipt = await tx.wait();
 
-      it("Should revert with the right error if called from another account", async function () {
-        const { lock, unlockTime, otherAccount } = await loadFixture(
-          deployOneYearLockFixture
-        );
+    expect(receipt.status).to.equal(1);
+    expect(receipt.logs.length).to.equal(0);
 
-        // using for testing
-        // We can increase the time in Hardhat Network
-        await time.increaseTo(unlockTime);
-
-        // We use lock.connect() to send a transaction from another account
-        await expect(lock.connect(otherAccount).withdraw()).to.be.revertedWith(
-          "You aren't the owner"
-        );
-      });
-
-      it("Shouldn't fail if the unlockTime has arrived and the owner calls it", async function () {
-        const { lock, unlockTime } = await loadFixture(
-          deployOneYearLockFixture
-        );
-
-        // Transactions are sent using the first signer by default
-        await time.increaseTo(unlockTime);
-
-        await expect(lock.withdraw()).not.to.be.reverted;
-      });
-    });
-
-    describe("Events", function () {
-      it("Should emit an event on withdrawals", async function () {
-        const { lock, unlockTime, lockedAmount } = await loadFixture(
-          deployOneYearLockFixture
-        );
-
-        await time.increaseTo(unlockTime);
-
-        await expect(lock.withdraw())
-          .to.emit(lock, "Withdrawal")
-          .withArgs(lockedAmount, anyValue); // We accept any value as `when` arg
-      });
-    });
-
-    describe("Transfers", function () {
-      it("Should transfer the funds to the owner", async function () {
-        const { lock, unlockTime, lockedAmount, owner } = await loadFixture(
-          deployOneYearLockFixture
-        );
-
-        await time.increaseTo(unlockTime);
-
-        await expect(lock.withdraw()).to.changeEtherBalances(
-          [owner, lock],
-          [lockedAmount, -lockedAmount]
-        );
-      });
-    });
+    const result = await myContract.callOtherContract();
+    expect(result).to.equal(valueToSet);
   });
 
+  it("should throw if the call to the other contract fails", async function () {
+    await otherContract.connect(otherContractOwner).setNumber(42);
+
+    // Remove the OtherContract address to make the call fail
+    await myContract.setOtherContract("0x0000000000000000000000000000000000000000");
+
+    await expect(myContract.callOtherContract()).to.be.revertedWith("Call failed");
+  });
+
+});
+
+describe('MyContractV2', function () {
+  let myContractV2: MyContractV2;
+  let token: Token;
+  let owner: SignerWithAddress;
+  let recipient: SignerWithAddress;
+
+  beforeEach(async () => {
+    const Token = await ethers.getContractFactory('Token');
+    token = await Token.deploy();
+
+    const MyContractV2 = await ethers.getContractFactory('MyContractV2');
+    myContractV2 = await MyContractV2.deploy();
+
+    await myContractV2.setTokenAddress(token.address);
+
+    [owner, recipient] = await ethers.getSigners();
+
+    // for testing
+    await token.connect(owner).setBalance(100);
+    await token.connect(recipient).setBalance(50);
+  });
+
+  it('should get balance from MyContractV2', async function () {
+    expect(await myContractV2.getTokenBalance(owner.address)).to.equal(100);
+    expect(await myContractV2.getTokenBalance(recipient.address)).to.equal(50);
+  });
+
+  it('should transfer token from one account to another by Token Contract', async function () {
+    await token.connect(owner).transfer( recipient.address, 100);
+    expect(await token.balanceOf( owner.address)).to.equal(100 - 100);
+    expect(await token.balanceOf( recipient.address)).to.equal(50 + 100);
+  });
+
+  it('should transfer token from one account to another by MyContractV2 Contract', async function () {
+    await myContractV2.connect(owner).transferToken( await recipient.getAddress(), 100);
+    expect(await myContractV2.getTokenBalance( owner.address)).to.equal(100 - 100);
+    expect(await myContractV2.getTokenBalance( recipient.address)).to.equal(50 + 100);
+  });
+
+
+});
+
+describe("MyContractV2.1", function () {
+  let myContract: MyContractV21;
+  let erc20Contract: MyToken;
+  let owner: SignerWithAddress;
+  let recipient: SignerWithAddress;
+
+  beforeEach(async function () {
+    [owner, recipient] = await ethers.getSigners();
+
+    // Deploy an instance of the ERC20 token contract
+    const erc20ContractFactory = await ethers.getContractFactory("MyToken");
+    erc20Contract = await erc20ContractFactory.deploy("BAC", "BAC", 18, 10500);
+
+    // Deploy an instance of MyContractV3 and set the ERC20 contract address
+    const myContractFactory = await ethers.getContractFactory("MyContractV21");
+    myContract = await myContractFactory.deploy(erc20Contract.address);
+
+    // Transfer some tokens to MyContractV3
+    await erc20Contract.transfer(myContract.address, 1000);
+  });
+
+  it("should transfer tokens to recipient", async function () {
+    // Transfer tokens from MyContractV3 to recipient
+    await myContract.connect(owner).transferERC20(await recipient.getAddress(), 500);
+
+    // Check the balances
+    const ownerBalance = await erc20Contract.balanceOf(await owner.getAddress());
+    const recipientBalance = await erc20Contract.balanceOf(await recipient.getAddress());
+    const myContractBalance = await erc20Contract.balanceOf(myContract.address);
+
+    expect(ownerBalance).to.equal(9500); // owner should have 9500 tokens left
+    expect(recipientBalance).to.equal(500); // recipient should have 500 tokens
+    expect(myContractBalance).to.equal(500); // MyContractV3 should have 500 tokens left
+  });
+
+  it("should return the balance of MyContractV3", async function () {
+    // Get the balance of MyContractV3
+    const balance = await myContract.getERC20Balance();
+
+    // Check the balance
+    expect(balance).to.equal(1000); // MyContractV3 should have 1000 tokens
+  });
+});
+
+describe("MyContractProxy", function () {
+  let myContractV3: MyContractV3;
+  let myContractProxy : MyContractProxy;
+
+  beforeEach(async function () {
+    const MyContractV4Factory = await ethers.getContractFactory("MyContractV3");
+    const MyContractProxyFactory = await ethers.getContractFactory("MyContractProxy");
+
+    myContractV3 = await MyContractV4Factory.deploy();
+    myContractProxy = await MyContractProxyFactory.deploy(myContractV3.address);
+  });
+
+  it("should set the number", async function () {
+    const number = 42;
+
+    await myContractProxy.setNumber(number);
+
+    expect(await myContractV3.myNumber()).to.equal(number);
+  });
 });

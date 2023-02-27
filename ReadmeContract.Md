@@ -41,3 +41,11 @@ Sử dụng kiểu dữ liệu thích hợp có thể giảm thiểu chi phí ga
 - Gộp các giao dịch lại với nhau: Nếu có thể, gộp các giao dịch lại với nhau sẽ giúp giảm thiểu gas sử dụng hơn.
 
 - Sử dụng thư viện ngoài: Sử dụng các thư viện ngoài sẽ giúp giảm thiểu việc lặp lại code và giúp cho hợp đồng của bạn trở nên nhỏ gọn hơn, do đó tiết kiệm được gas sử dụng.
+
+Lưu ý khi viết code
+https://viblo.asia/p/nhung-luu-y-khi-phat-trien-hop-dong-thong-minh-bang-solidity-ORNZqjrNl0n
+
+Có thể tương tác với các smart contract khác bằng cách sử dụng thư viện trực tiếp (direct library calls) hoặc bằng cách sử dụng các proxy contract.
+- Tương tác với smart contract sử dụng thư viện trực tiếp là khi bạn gọi các hàm trong một smart contract khác bằng cách sử dụng các hàm đó được định nghĩa trực tiếp trong mã của smart contract hiện tại. Để làm điều này, bạn cần biết địa chỉ của smart contract và các hàm mà nó cung cấp. Để sử dụng thư viện trực tiếp, bạn có thể sử dụng cú pháp sau: `otherContract.doSomething()`.
+
+- Tương tác với smart contract bằng cách sử dụng các `proxy contract` là khi bạn tạo một smart contract mới để tương tác với một smart contract khác. Proxy contract cung cấp một giao diện để gọi các hàm trong smart contract khác và trung gian để thực hiện các giao dịch. Proxy contract có thể giúp bạn giảm chi phí gas khi tương tác với smart contract khác bằng cách lưu trữ tên và địa chỉ của các hàm được gọi và tối ưu hóa chi phí gas.
