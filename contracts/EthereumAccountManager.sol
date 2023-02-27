@@ -4,24 +4,30 @@ pragma solidity ^0.8.0;
 import "@openzeppelin/contracts/utils/math/SafeMath.sol";
 
 contract EthereumAccountManager {
-    function add(uint256 a, uint256 b) public pure returns (uint256) {
-        uint256 c = a + b;
-        assert(c >= a);
-        return c;
+    uint public unlockTime;
+    address payable public owner;
+
+    event Withdrawal(uint amount, uint when);
+
+    constructor(uint _unlockTime) payable {
+        require(
+            block.timestamp < _unlockTime,
+            "Unlock time should be in the future"
+        );
+
+        unlockTime = _unlockTime;
+        owner = payable(msg.sender);
     }
 
-    function sub(uint256 a, uint256 b) public pure returns (uint256) {
-        if (a <= b) {
-            revert("Sub not allow");
-        }
-        return a - b;
-    }
+    function withdraw() public {
+        // Uncomment this line, and the import of "hardhat/console.sol", to print a log in your terminal
+        // console.log("Unlock time is %o and block timestamp is %o", unlockTime, block.timestamp);
 
-    function divide(
-        uint256 _numerator,
-        uint256 _denominator
-    ) public pure returns (uint256) {
-        require(_denominator != 0, "Denominator cannot be zero");
-        return _numerator / _denominator;
+        require(block.timestamp >= unlockTime, "You can't withdraw yet");
+        require(msg.sender == owner, "You aren't the owner");
+
+        emit Withdrawal(address(this).balance, block.timestamp);
+
+        owner.transfer(address(this).balance);
     }
 }
