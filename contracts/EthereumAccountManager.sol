@@ -1,230 +1,241 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.0;
 
-// version 1: call function
+import "@openzeppelin/contracts/token/ERC721/ERC721.sol";
+import "@openzeppelin/contracts/utils/Counters.sol";
 
-contract MyContract {
-    address public otherContract;
+contract MyNFTV1 is ERC721 {
+    using Counters for Counters.Counter;
+    Counters.Counter private _tokenIds;
 
-    function setOtherContract(address _address) public {
-        otherContract = _address;
+    event NewItemMint(uint256 id);
+
+    constructor() ERC721("MyNFT", "MNFT") {}
+
+    function mint(address owner) public {
+        _tokenIds.increment();
+        uint256 newItemId = _tokenIds.current();
+        _mint(owner, newItemId);
+        emit NewItemMint(newItemId);
     }
 
-    function callOtherContract() public returns (uint) {
-        // Call the "getNumber" function of the other contract and return the result
-        (bool success, bytes memory result) = otherContract.call(
-            abi.encodeWithSignature("getNumber()")
+    function ownerOf(uint256 tokenId) public view override returns (address) {
+        return ERC721.ownerOf(tokenId);
+    }
+}
+
+import "@openzeppelin/contracts/token/ERC721/extensions/ERC721URIStorage.sol";
+
+import "hardhat/console.sol";
+
+contract NFTMarketplace is ERC721URIStorage {
+    using Counters for Counters.Counter;
+
+    Counters.Counter private _tokenIds;
+    Counters.Counter private _itemsSold;
+
+    address payable owner;
+
+    uint256 private listingPrice = 0.015 ether;
+
+    mapping(uint256 => MarketItem) private idMarketItem;
+
+    struct MarketItem {
+        uint256 tokenId;
+        address payable seller;
+        address payable owner;
+        uint256 price;
+        bool sold;
+    }
+
+    event MarketItemCreated(
+        uint256 indexed tokenId,
+        address seller,
+        address owner,
+        uint256 price,
+        bool sold
+    );
+
+    constructor() ERC721("Market NFT", "MYNFT") {
+        owner = payable(msg.sender);
+    }
+
+    modifier onlyOwner() {
+        require(
+            owner == msg.sender,
+            "only owner of marketplace can change listing price"
         );
-        require(success, "Call failed");
-        return abi.decode(result, (uint));
-    }
-}
-
-contract OtherContract {
-    uint public number;
-
-    function setNumber(uint _number) public {
-        number = _number;
+        _;
     }
 
-    function getNumber() public view returns (uint) {
-        return number;
-    }
-}
-
-// version v2: interface
-
-interface IToken {
-    function transfer(
-        address recipient,
-        uint256 amount
-    ) external returns (bool);
-
-    function balanceOf(address account) external view returns (uint256);
-}
-
-contract MyContractV2 {
-    address public tokenAddress;
-
-    function setTokenAddress(address _tokenAddress) public {
-        tokenAddress = _tokenAddress;
+    function updateListingPrice(uint256 _price) public payable onlyOwner {
+        listingPrice = _price;
     }
 
-    function transferToken(address _recipient, uint256 _amount) public {
-        IToken(tokenAddress).transfer(_recipient, _amount);
+    function getListingPrice() public view returns (uint256) {
+        return listingPrice;
     }
 
-    function getTokenBalance(address _account) public view returns (uint256) {
-        return IToken(tokenAddress).balanceOf(_account);
-    }
-}
+    function createToken(string memory tokenURI, uint256 price)
+        public
+        payable
+        returns (uint256)
+    {
+        _tokenIds.increment();
 
-contract Token is IToken {
-    mapping(address => uint256) balances;
+        uint256 newTokenId = _tokenIds.current();
 
-    function setBalance(uint256 amount) public returns (uint256) {
-        balances[msg.sender] += amount;
-        return balances[msg.sender];
-    }
+        _mint(msg.sender, newTokenId);
+        _setTokenURI(newTokenId, tokenURI);
 
-    function transfer(
-        address _recipient,
-        uint256 _amount
-    ) public override returns (bool) {
-        balances[msg.sender] -= _amount;
-        balances[_recipient] += _amount;
-        return true;
+        createMarketItem(newTokenId, price);
+
+        return newTokenId;
     }
 
-    function balanceOf(
-        address _account
-    ) public view override returns (uint256) {
-        return balances[_account];
-    }
-}
+    function createMarketItem(uint256 tokenId, uint256 price) private {
+        require(price > 0, "Price must be at least 1");
+        require(
+            msg.value == listingPrice,
+            "Price must be equal to listing price"
+        );
 
-// version v2.1
+        idMarketItem[tokenId] = MarketItem(
+            tokenId,
+            payable(msg.sender),
+            payable(address(this)),
+            price,
+            false
+        );
 
-import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+        // transfer owner tokenURI
+        _transfer(msg.sender, address(this), tokenId);
 
-contract MyContractV21 {
-    address public erc20ContractAddress;
-    IERC20 public erc20Contract;
-
-    constructor(address _erc20ContractAddress) {
-        erc20ContractAddress = _erc20ContractAddress;
-        erc20Contract = IERC20(_erc20ContractAddress);
-    }
-
-    function transferERC20(address _recipient, uint _amount) public {
-        // Transfer tokens from this contract to the recipient
-        erc20Contract.transfer(_recipient, _amount);
-    }
-
-    function getERC20Balance() public view returns (uint) {
-        // Get the balance of this contract's address in the ERC20 contract
-        return erc20Contract.balanceOf(address(this));
-    }
-}
-
-contract MyToken is IERC20 {
-    string public name;
-    string public symbol;
-    uint8 public decimals;
-    uint256 private _totalSupply;
-    mapping(address => uint256) private _balances;
-    mapping(address => mapping(address => uint256)) private _allowances;
-
-    constructor(
-        string memory _name,
-        string memory _symbol,
-        uint8 _decimals,
-        uint256 _initialSupply
-    ) {
-        name = _name;
-        symbol = _symbol;
-        decimals = _decimals;
-        _totalSupply = _initialSupply;
-        _balances[msg.sender] = _totalSupply;
-        emit Transfer(address(0), msg.sender, _totalSupply);
+        emit MarketItemCreated(
+            tokenId,
+            msg.sender,
+            address(this),
+            price,
+            false
+        );
     }
 
-    function totalSupply() public view override returns (uint256) {
-        return _totalSupply;
+    function reSellToken(uint256 tokenId, uint256 price) public payable {
+        require(
+            idMarketItem[tokenId].owner == msg.sender,
+            "Only item owner can perform this operation"
+        );
+
+        require(
+            msg.value == listingPrice,
+            "Price must be equal to listing price"
+        );
+
+        idMarketItem[tokenId].sold = false;
+        idMarketItem[tokenId].price = price;
+        idMarketItem[tokenId].seller = payable(msg.sender);
+        idMarketItem[tokenId].owner = payable(address(this));
+
+        _itemsSold.decrement();
+
+        _transfer(msg.sender, address(this), tokenId);
     }
 
-    function balanceOf(address account) public view override returns (uint256) {
-        return _balances[account];
+    function createMarketSale(uint256 tokenId) public payable {
+        uint256 price = idMarketItem[tokenId].price;
+
+        require(
+            msg.value == price,
+            "Please sudmit the asking price in order to complete the purchage"
+        );
+
+        address seller = idMarketItem[tokenId].seller;
+
+        idMarketItem[tokenId].owner = payable(msg.sender);
+        idMarketItem[tokenId].sold = true;
+        idMarketItem[tokenId].seller = payable(address(0));
+
+        _itemsSold.increment();
+
+        _transfer(address(this), msg.sender, tokenId);
+
+        payable(owner).transfer(listingPrice);
+        payable(seller).transfer(msg.value);
     }
 
-    function transfer(address recipient, uint256 amount) public override returns (bool) {
-        _transfer(msg.sender, recipient, amount);
-        return true;
+    function getMarketItem(uint256 tokenId)
+        public
+        view
+        returns (MarketItem memory)
+    {
+        require(idMarketItem[tokenId].owner != address(0), "Token not found");
+        return idMarketItem[tokenId];
     }
 
-    function allowance(address owner, address spender) public view override returns (uint256) {
-        return _allowances[owner][spender];
-    }
+    function fetchMarketItems() public view returns (MarketItem[] memory) {
+        uint256 itemCount = _tokenIds.current();
+        uint256 unSoldItemCount = _tokenIds.current() - _itemsSold.current();
 
-    function approve(address spender, uint256 amount) public override returns (bool) {
-        _approve(msg.sender, spender, amount);
-        return true;
-    }
+        uint256 currentIndex = 0;
 
-    function transferFrom(address sender, address recipient, uint256 amount) public override returns (bool) {
-        _transfer(sender, recipient, amount);
-        _approve(sender, msg.sender, _allowances[sender][msg.sender] - amount);
-        return true;
-    }
-
-    function increaseAllowance(address spender, uint256 addedValue) public virtual returns (bool) {
-        _approve(msg.sender, spender, _allowances[msg.sender][spender] + addedValue);
-        return true;
-    }
-
-    function decreaseAllowance(address spender, uint256 subtractedValue) public virtual returns (bool) {
-        _approve(msg.sender, spender, _allowances[msg.sender][spender] - subtractedValue);
-        return true;
-    }
-
-    function _transfer(address sender, address recipient, uint256 amount) internal virtual {
-        require(sender != address(0), "transfer from the zero address");
-        require(recipient != address(0), "transfer to the zero address");
-        require(_balances[sender] >= amount, "transfer amount exceeds balance");
-        _balances[sender] -= amount;
-        _balances[recipient] += amount;
-        emit Transfer(sender, recipient, amount);
-    }
-
-    function _approve(address owner, address spender, uint256 amount) internal virtual {
-        require(owner != address(0), "approve from the zero address");
-        require(spender != address(0), "approve to the zero address");
-        _allowances[owner][spender] = amount;
-        emit Approval(owner, spender, amount);
-    }
-}
-
-// version 3
-// Proxy contract
-contract MyContractProxy {
-    address private _implementation;
-
-    constructor(address implementation) {
-        _implementation = implementation;
-    }
-
-    fallback() external payable {
-        address implementation = _implementation;
-        assembly {
-            let ptr := mload(0x40)
-            calldatacopy(ptr, 0, calldatasize())
-            let result := delegatecall(
-                gas(),
-                implementation,
-                ptr,
-                calldatasize(),
-                0,
-                0
-            )
-            let size := returndatasize()
-            returndatacopy(ptr, 0, size)
-
-            switch result
-            case 0 {
-                revert(ptr, size)
-            }
-            default {
-                return(ptr, size)
+        MarketItem[] memory items = new MarketItem[](unSoldItemCount);
+        for (uint256 i = 0; i < itemCount; i++) {
+            if (idMarketItem[i + 1].owner == address(this)) {
+                uint256 currentId = i + 1;
+                MarketItem storage currentItem = idMarketItem[currentId];
+                items[currentIndex] = currentItem;
+                currentIndex += 1;
             }
         }
+
+        return items;
     }
-}
 
-// Real contract
-contract MyContractV3 {
-    uint public myNumber;
+    function fetchMyNFT() public view returns (MarketItem[] memory) {
+        uint256 totalCount = _tokenIds.current();
+        uint256 itemCount = 0;
+        uint256 currentIndex = 0;
 
-    function setNumber(uint number) public {
-        myNumber = number;
+        for (uint256 i = 0; i < totalCount; i++) {
+            if (idMarketItem[i + 1].owner == msg.sender) {
+                itemCount += 1;
+            }
+        }
+
+        MarketItem[] memory items = new MarketItem[](itemCount);
+        for (uint256 i = 0; i < totalCount; i++) {
+            if (idMarketItem[i + 1].owner == msg.sender) {
+                uint256 currentId = i + 1;
+                MarketItem storage currentItem = idMarketItem[currentId];
+                items[currentIndex] = currentItem;
+                currentIndex += 1;
+            }
+        }
+
+        return items;
+    }
+
+    function fetchItemsListed() public view returns (MarketItem[] memory) {
+        uint256 totalCount = _tokenIds.current();
+        uint256 itemCount = 0;
+        uint256 currentIndex = 0;
+
+        for (uint256 i = 0; i < totalCount; i++) {
+            if (idMarketItem[i + 1].seller == msg.sender) {
+                itemCount += 1;
+            }
+        }
+
+        MarketItem[] memory items = new MarketItem[](itemCount);
+        for (uint256 i = 0; i < totalCount; i++) {
+            if (idMarketItem[i + 1].seller == msg.sender) {
+                uint256 currentId = i + 1;
+                MarketItem storage currentItem = idMarketItem[currentId];
+                items[currentIndex] = currentItem;
+                currentIndex += 1;
+            }
+        }
+
+        return items;
     }
 }

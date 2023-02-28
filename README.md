@@ -19,12 +19,12 @@ run test
 npx hardhat test
 ```
 
-deployed https://testnet.bscscan.com/address/0x777ffe5388BAB8E12c9806C8A3a68220FAC09a63
+deployed https://testnet.bscscan.com/address/0xeea97b3Af62c54C0EB65e0c250b2b84B3135C428
 ```
-0x777ffe5388BAB8E12c9806C8A3a68220FAC09a63
+0xeea97b3Af62c54C0EB65e0c250b2b84B3135C428
 ```
 
 verify contract
 ```
-npx hardhat  verify --network bsctest 0x777ffe5388BAB8E12c9806C8A3a68220FAC09a63
+npx hardhat verify --network bsctest 0xeea97b3Af62c54C0EB65e0c250b2b84B3135C428
 ```
